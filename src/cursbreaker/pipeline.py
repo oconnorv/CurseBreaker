@@ -9,6 +9,7 @@ re-rendered to PNG at the dimensions the bounding boxes refer to, so the
 from __future__ import annotations
 
 import errno
+import shutil
 from concurrent.futures import ThreadPoolExecutor
 from dataclasses import dataclass, field
 from pathlib import Path
@@ -26,6 +27,7 @@ from .images import (
     iter_pages,
     load_output_images,
     load_pages,
+    pdf_has_text_layer,
 )
 from .models import OcrWord, PageResult, PixelBox, PlacedLine, TokenUsage, TranscribedLine
 from .pricing import PRICES_AS_OF, cost_for, effective_rates, pricing_for
@@ -322,6 +324,7 @@ def process_file(
     report: StepReporter | None = None,
     should_cancel: CancelCheck | None = None,
     outputs: Collection[str] | None = None,
+    skip_text_overlay: bool = False,
 ) -> FileResult:
     report = report or _noop
     path = Path(path)
@@ -423,9 +426,15 @@ def process_file(
         pdf_name = f"{stem}.pdf"
         pdf_out = out_dir / pdf_name
         if path.suffix.lower() in PDF_EXT:
-            # Overlay the text on the *original* PDF -- original image quality,
-            # page sizes and orientation preserved, no re-rasterization.
-            write_searchable_pdf_over_source(path, page_results, pdf_out)
+            if skip_text_overlay and pdf_has_text_layer(path):
+                # The source already carries a searchable text layer and the user
+                # opted (batch-wide) to keep it rather than add ours: pass the
+                # original through unchanged -- no second overlay, no size growth.
+                shutil.copyfile(path, pdf_out)
+            else:
+                # Overlay the text on the *original* PDF -- original image quality,
+                # page sizes and orientation preserved, no re-rasterization.
+                write_searchable_pdf_over_source(path, page_results, pdf_out)
         else:
             # Embed the original source image(s) untouched (JPEG byte-for-byte;
             # others full-resolution and lossless) -- not the downscaled/enhanced
@@ -470,6 +479,7 @@ def process_batch(
     should_cancel: CancelCheck | None = None,
     on_disk_full: DiskFullHandler | None = None,
     outputs: Collection[str] | None = None,
+    skip_text_overlay: bool = False,
 ) -> list[FileResult]:
     """Transcribe each file, emitting a ``ProgressEvent`` per step to ``report``.
 
@@ -521,7 +531,7 @@ def process_batch(
                     process_file(
                         path, provider, settings, out_dir,
                         report=report_line, should_cancel=should_cancel,
-                        outputs=outputs,
+                        outputs=outputs, skip_text_overlay=skip_text_overlay,
                     )
                 )
             except JobCancelled:  # cancelled mid-file: drop the partial file, stop

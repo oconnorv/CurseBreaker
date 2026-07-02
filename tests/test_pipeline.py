@@ -632,6 +632,78 @@ def test_image_input_searchable_pdf_embeds_full_resolution(png_path, tmp_path):
         assert round(doc[0].rect.width) == ow and round(doc[0].rect.height) == oh
 
 
+# --- skip our overlay for PDFs that already have a searchable text layer --- #
+
+def _text_layer_pdf(path, n=2):
+    """A PDF that already carries a real, substantial text layer (above the
+    detection threshold), like a born-digital or already-OCR'd document."""
+    import fitz
+    doc = fitz.open()
+    for _ in range(n):
+        doc.new_page(width=612, height=792).insert_text(
+            (72, 100), "This page already carries a real searchable text layer. " * 6
+        )
+    doc.save(path)
+    doc.close()
+
+
+def _image_only_pdf(path, n=2):
+    """A scanned PDF with no text layer -- each page is just an image."""
+    import fitz
+    doc = fitz.open()
+    pix = fitz.Pixmap(fitz.csRGB, fitz.IRect(0, 0, 40, 40))
+    pix.clear_with(220)
+    for _ in range(n):
+        doc.new_page(width=612, height=792).insert_image(
+            fitz.Rect(0, 0, 612, 792), pixmap=pix
+        )
+    doc.save(path)
+    doc.close()
+
+
+def test_skip_overlay_passes_already_searchable_pdf_through_unchanged(tmp_path):
+    src = tmp_path / "searchable.pdf"
+    _text_layer_pdf(src)
+    original = src.read_bytes()
+    out = tmp_path / "out"
+    r = process_file(
+        src, MockProvider(), Settings(mode="one_pass"), out,
+        outputs={"pdf"}, skip_text_overlay=True,
+    )
+    assert r.pdf_name
+    # Already searchable -> passed through byte-for-byte: no second overlay, no
+    # size growth.
+    assert (out / r.pdf_name).read_bytes() == original
+
+
+def test_skip_overlay_still_overlays_a_scan_without_text(tmp_path):
+    import fitz
+    src = tmp_path / "scan.pdf"
+    _image_only_pdf(src)
+    original = src.read_bytes()
+    out = tmp_path / "out"
+    r = process_file(
+        src, MockProvider(), Settings(mode="one_pass"), out,
+        outputs={"pdf"}, skip_text_overlay=True,
+    )
+    # No existing layer -> the batch-wide skip doesn't apply to this file; our
+    # searchable overlay is still added.
+    assert (out / r.pdf_name).read_bytes() != original
+    with fitz.open(out / r.pdf_name) as doc:
+        assert doc[0].get_text().strip()  # now searchable
+
+
+def test_without_skip_flag_overlays_even_an_already_searchable_pdf(tmp_path):
+    src = tmp_path / "searchable.pdf"
+    _text_layer_pdf(src)
+    original = src.read_bytes()
+    out = tmp_path / "out"
+    r = process_file(
+        src, MockProvider(), Settings(mode="one_pass"), out, outputs={"pdf"},
+    )  # skip_text_overlay defaults to False -> behaviour unchanged
+    assert (out / r.pdf_name).read_bytes() != original  # our overlay is applied
+
+
 def test_progress_default_report_is_optional(png_path, tmp_path):
     # process_file/process_page still work with no reporter passed (back-compat).
     out = tmp_path / "out"

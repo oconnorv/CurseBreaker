@@ -160,6 +160,17 @@
         <label><input type="checkbox" id="out-pdf" value="pdf" /> Searchable PDF</label>
       </fieldset>
 
+      <!-- Appears only when some staged PDFs already carry a searchable text
+           layer (detected in the background) and a searchable PDF will be built.
+           One choice for the whole batch: keep those files' existing layer and
+           pass them through unchanged, rather than adding a second overlay. -->
+      <div id="skip-overlay-wrap" class="skip-overlay" hidden>
+        <label>
+          <input type="checkbox" id="skip-overlay" />
+          <span id="skip-overlay-label"></span>
+        </label>
+      </div>
+
       <div class="actions">
         <button id="transcribe" class="btn primary" type="button" disabled>Transcribe</button>
         <button id="estimate" class="btn" type="button" disabled>Estimate cost</button>

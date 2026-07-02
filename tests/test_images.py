@@ -1,10 +1,13 @@
 from PIL import Image, TiffImagePlugin, UnidentifiedImageError
 
+import fitz
+
 from cursbreaker.images import (
     count_content_pages,
     is_supported,
     load_output_images,
     load_pages,
+    pdf_has_text_layer,
 )
 
 
@@ -171,3 +174,47 @@ def test_output_image_multiframe_tiff_falls_back_to_decoded_frames(tmp_path):
     spec = specs[0]
     assert spec.data is None and spec.image is not None
     assert (spec.width, spec.height) == (800, 600)
+
+
+# --- pdf_has_text_layer: detect an already-searchable PDF ---------------- #
+
+def _pdf(path, texts):
+    """A PDF whose page i shows ``texts[i]`` (empty string -> a bare image page,
+    i.e. a scan with no text layer)."""
+    doc = fitz.open()
+    pix = fitz.Pixmap(fitz.csRGB, fitz.IRect(0, 0, 40, 40))
+    pix.clear_with(220)
+    for t in texts:
+        page = doc.new_page(width=612, height=792)
+        if t:
+            page.insert_text((72, 100), t)
+        else:
+            page.insert_image(fitz.Rect(0, 0, 612, 792), pixmap=pix)
+    doc.save(path)
+    doc.close()
+    return path
+
+
+def test_pdf_has_text_layer_true_for_real_text(tmp_path):
+    p = _pdf(tmp_path / "text.pdf", ["A page of real searchable text. " * 6] * 3)
+    assert pdf_has_text_layer(p) is True
+
+
+def test_pdf_has_text_layer_false_for_image_only_scan(tmp_path):
+    p = _pdf(tmp_path / "scan.pdf", ["", "", ""])
+    assert pdf_has_text_layer(p) is False
+
+
+def test_pdf_has_text_layer_false_for_sparse_text_and_non_pdfs(tmp_path, png_path):
+    # A running header / page number alone isn't a real text layer.
+    sparse = _pdf(tmp_path / "sparse.pdf", ["p. 1", "p. 2", "p. 3"])
+    assert pdf_has_text_layer(sparse) is False
+    # Images never have a text layer.
+    assert pdf_has_text_layer(png_path) is False
+
+
+def test_pdf_has_text_layer_true_when_most_pages_have_text(tmp_path):
+    # Majority-rule: a mostly-text document with a couple of blank/image pages
+    # still counts as already searchable.
+    p = _pdf(tmp_path / "mostly.pdf", ["Real searchable text here. " * 6] * 3 + ["", ""])
+    assert pdf_has_text_layer(p) is True

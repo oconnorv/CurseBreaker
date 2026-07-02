@@ -403,6 +403,8 @@ function renderStaged() {
   const est = $("estimate-info");
   if (est) { est.hidden = true; est.innerHTML = ""; }
   $("action-note").textContent = stagedStatus();
+  // Removing files can change how many already-searchable PDFs remain.
+  updateSkipOverlayControl();
 }
 
 // ---- lazy page counts --------------------------------------------------- //
@@ -428,6 +430,49 @@ function applyStagedPages(list, pages) {
   return changed;
 }
 
+// Merge the server's "already has a searchable text layer" flags into the staged
+// model (computed in the same background pass as the page counts).
+function applyStagedTextLayers(list, textLayers) {
+  if (!textLayers) return;
+  for (const f of list) {
+    if ((f.hasText === null || f.hasText === undefined)
+        && typeof textLayers[f.id] === "boolean") {
+      f.hasText = textLayers[f.id];
+    }
+  }
+}
+
+// The batch-level "skip our overlay for already-searchable PDFs" toggle is shown
+// only when some staged files already carry a text layer AND a searchable PDF
+// will actually be built (it only affects that output). One decision covers the
+// whole batch -- never per file or per page.
+function updateSkipOverlayControl() {
+  const wrap = $("skip-overlay-wrap");
+  if (!wrap) return;
+  const n = staged.filter((f) => f.hasText === true).length;
+  const outs = selectedOutputs();
+  const pdfInPlay = outs.length === 0 || outs.includes("pdf");
+  if (n > 0 && pdfInPlay) {
+    const label = $("skip-overlay-label");
+    if (label) {
+      label.textContent =
+        `${n} file(s) already contain searchable text — skip adding CursBreaker's `
+        + `PDF overlay for them, keeping each original's existing text layer.`;
+    }
+    wrap.hidden = false;
+  } else {
+    wrap.hidden = true;
+  }
+}
+
+// Whether the user has actively opted to skip the overlay: only counts when the
+// control is visible (relevant) and ticked.
+function skipOverlayActive() {
+  const wrap = $("skip-overlay-wrap");
+  const cb = $("skip-overlay");
+  return !!(wrap && !wrap.hidden && cb && cb.checked);
+}
+
 function pollStagedPages() {
   clearInterval(stagedPagesTimer);
   if (!pendingPageCounts(staged)) return;
@@ -442,6 +487,10 @@ function pollStagedPages() {
     if (applyStagedPages(staged, data.pages || {}) && !pendingPageCounts(staged)) {
       $("action-note").textContent = stagedStatus();
     }
+    // Existing-text-layer flags land in the same pass; reveal the skip toggle
+    // once any already-searchable files are known.
+    applyStagedTextLayers(staged, data.text_layers);
+    updateSkipOverlayControl();
     // Stop once every file has a number, or after a generous cap so a lost
     // server (e.g. a restart) can't leave us polling forever.
     if (!pendingPageCounts(staged) || ++ticks > 600) clearInterval(stagedPagesTimer);
@@ -485,6 +534,7 @@ async function transcribe() {
     const { job_id } = await api("POST", "/api/process", {
       file_ids: staged.map((f) => f.id),
       outputs: selectedOutputs(),
+      skip_existing_text_overlay: skipOverlayActive(),
     });
     activeJobId = job_id;
     const cancel = $("cancel-job");
@@ -1046,6 +1096,14 @@ function wire() {
     if (cb) cb.addEventListener("change", syncDownloadSelected);
   }
   syncDownloadSelected();
+
+  // The "skip our overlay" toggle only matters when a searchable PDF is being
+  // built, so re-evaluate it whenever the output picker changes.
+  for (const t of OUTPUT_FORMAT_IDS) {
+    const cb = $("out-" + t);
+    if (cb) cb.addEventListener("change", updateSkipOverlayControl);
+  }
+  updateSkipOverlayControl();
 
   // Settings disclosure (heading > button) toggle + theme switcher.
   $("settings-toggle").onclick = () =>
