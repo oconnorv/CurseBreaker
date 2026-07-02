@@ -34,7 +34,7 @@ from . import __version__
 from .config import load_settings, save_settings
 from .gemini_client import make_provider
 from .hocr import XHTML_NS
-from .images import SUPPORTED_EXT, count_content_pages, is_supported
+from .images import SUPPORTED_EXT, count_content_pages, is_supported, pdf_has_text_layer
 from .pipeline import OUTPUT_FORMATS, estimate_usage, process_batch
 from .pricing import (
     CATALOG,
@@ -93,6 +93,11 @@ JOBS: dict[str, dict] = {}
 # the browser polls /api/staged-pages to fill the numbers in. They're a display
 # hint only -- processing and estimating recount independently.
 STAGED_PAGES: dict[str, int | None] = {}
+# Whether each staged PDF already carries a searchable text layer (``None`` while
+# still being scanned). Computed in the same background pass as the page counts
+# and polled alongside them, so the UI can offer to skip our overlay for a batch
+# whose inputs are already searchable. Non-PDFs are always ``False``.
+STAGED_HAS_TEXT: dict[str, bool | None] = {}
 _STAGED_PAGES_LOCK = threading.Lock()
 
 # Browser heartbeat / auto-shutdown state. Tests don't start the watchdog; it is
@@ -196,14 +201,17 @@ def _page_count(path: Path) -> int:
 
 
 def _count_pages_bg(file_ids: list[str]) -> None:
-    """Fill in page counts for just-staged files, off the request thread. Counts
-    are recorded one at a time so the browser's poll sees them appear
-    incrementally rather than all-or-nothing at the end of a big batch."""
+    """Fill in page counts (and the existing-text-layer flag) for just-staged
+    files, off the request thread. Recorded one at a time so the browser's poll
+    sees them appear incrementally rather than all-or-nothing at the end of a big
+    batch."""
     for fid in file_ids:
         path = STAGED.get(fid)
         n = _page_count(path) if path is not None else None
+        has_text = pdf_has_text_layer(path) if path is not None else False
         with _STAGED_PAGES_LOCK:
             STAGED_PAGES[fid] = n
+            STAGED_HAS_TEXT[fid] = has_text
 
 
 _UPLOAD_CHUNK = 1024 * 1024  # stream uploads to disk a MB at a time
@@ -258,6 +266,7 @@ def upload(files: list[UploadFile] = File(...)):
     with _STAGED_PAGES_LOCK:
         for fid in new_ids:
             STAGED_PAGES[fid] = None  # "counting" until the worker records a number
+            STAGED_HAS_TEXT[fid] = None
     threading.Thread(target=_count_pages_bg, args=(new_ids,), daemon=True).start()
     return {"files": staged}
 
@@ -267,9 +276,13 @@ def staged_pages():
     """Current page counts for staged files: ``{id: int}`` once known, ``null``
     while a file is still being counted. The browser polls this after an upload
     to fill the staged list's page pills in, without ever blocking the upload (or
-    Transcribe/Estimate, which work the moment files are staged) on the scan."""
+    Transcribe/Estimate, which work the moment files are staged) on the scan.
+
+    ``text_layers`` reports, per file, whether it already carries a searchable
+    text layer (``null`` while still scanning) so the UI can offer to skip our
+    overlay for a batch that's already searchable."""
     with _STAGED_PAGES_LOCK:
-        return {"pages": dict(STAGED_PAGES)}
+        return {"pages": dict(STAGED_PAGES), "text_layers": dict(STAGED_HAS_TEXT)}
 
 
 class StagePathRequest(BaseModel):
@@ -319,6 +332,7 @@ def stage_path(req: StagePathRequest):
     with _STAGED_PAGES_LOCK:
         for fid in new_ids:
             STAGED_PAGES[fid] = None
+            STAGED_HAS_TEXT[fid] = None
     threading.Thread(target=_count_pages_bg, args=(new_ids,), daemon=True).start()
     return {"files": staged, "skipped": skipped}
 
@@ -329,6 +343,10 @@ class ProcessRequest(BaseModel):
     # Output kinds to write (subset of pipeline.OUTPUT_FORMATS). Empty/omitted
     # means "create everything", so leaving the picker untouched is unchanged.
     outputs: list[str] | None = None
+    # Batch-wide: for input PDFs that already carry a searchable text layer, keep
+    # the original's layer and skip adding ours (pass the original through). Only
+    # affects those files; others still get the overlay.
+    skip_existing_text_overlay: bool = False
 
 
 class EstimateRequest(BaseModel):
@@ -425,7 +443,10 @@ def process(req: ProcessRequest):
         "_resume_action": None,    # "resume" | "end" -- read by the worker on wake
     }
     threading.Thread(
-        target=_run_job, args=(job_id, paths, settings, out_dir, outputs), daemon=True
+        target=_run_job,
+        args=(job_id, paths, settings, out_dir, outputs),
+        kwargs={"skip_text_overlay": req.skip_existing_text_overlay},
+        daemon=True,
     ).start()
     return {"job_id": job_id}
 
@@ -447,7 +468,7 @@ def _append_log(job: dict, message: str, cap: int = _LOG_CAP) -> None:
     job["log_total"] = job.get("log_total", 0) + 1
 
 
-def _run_job(job_id, paths, settings, out_dir, outputs=None):
+def _run_job(job_id, paths, settings, out_dir, outputs=None, *, skip_text_overlay=False):
     job = JOBS[job_id]
     try:
         provider = make_provider(settings)
@@ -504,6 +525,7 @@ def _run_job(job_id, paths, settings, out_dir, outputs=None):
             should_cancel=lambda: bool(job.get("_cancel")),
             on_disk_full=on_disk_full,
             outputs=outputs,
+            skip_text_overlay=skip_text_overlay,
         )
         job["results"] = [
             {

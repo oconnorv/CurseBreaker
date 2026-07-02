@@ -71,7 +71,8 @@ const check = (name, cond, extra) => {
 };
 
 const { planUploadBatches, formatBytes, uploadStatusText, isSupportedFile,
-        stagedStatus, pendingPageCounts, applyStagedPages } = sandbox;
+        stagedStatus, pendingPageCounts, applyStagedPages,
+        applyStagedTextLayers } = sandbox;
 check("planUploadBatches is exported", typeof planUploadBatches === "function");
 check("formatBytes is exported", typeof formatBytes === "function");
 check("uploadStatusText is exported", typeof uploadStatusText === "function");
@@ -158,6 +159,23 @@ check("applyStagedPages resolves the last one", list[2].pages === 7 && changed =
 check("pendingPageCounts false once all known", pendingPageCounts(list) === false);
 check("applyStagedPages no-op when nothing new", applyStagedPages(list, { a: 99 }) === false);
 check("applyStagedPages didn't overwrite a known count", list[0].pages === 5, list[0].pages);
+
+// --- Group E: existing-text-layer flags --------------------------------- //
+check("applyStagedTextLayers is exported", typeof applyStagedTextLayers === "function");
+const tl = [{ id: "a" }, { id: "b" }, { id: "c", hasText: true }];
+applyStagedTextLayers(tl, { a: true, b: false });  // 'c' already known
+check("applyStagedTextLayers records a true flag", tl[0].hasText === true, String(tl[0].hasText));
+check("applyStagedTextLayers records a false flag", tl[1].hasText === false, String(tl[1].hasText));
+check("applyStagedTextLayers leaves an already-known flag", tl[2].hasText === true);
+check("applyStagedTextLayers leaves a still-unknown flag undefined",
+  applyStagedTextLayers(tl, {}) === undefined && tl[1].hasText === false);
+// A file still being scanned (null) must not be coerced to a boolean.
+const pending = [{ id: "x" }];
+applyStagedTextLayers(pending, { x: null });
+check("applyStagedTextLayers ignores a null (still scanning)", pending[0].hasText === undefined,
+  String(pending[0].hasText));
+applyStagedTextLayers(pending, undefined);  // tolerates a missing map
+check("applyStagedTextLayers tolerates a missing map", pending[0].hasText === undefined);
 
 console.log("\n" + (failures === 0 ? "ALL PASS" : failures + " FAILURE(S)"));
 process.exit(failures === 0 ? 0 : 1);

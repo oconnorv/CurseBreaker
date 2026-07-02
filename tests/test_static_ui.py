@@ -86,3 +86,14 @@ def test_disabled_buttons_read_as_inactive():
     # The Estimate button really is a plain .btn, so it depends on the rule above.
     html = client.get("/").text
     assert '<button id="estimate" class="btn"' in html
+
+
+def test_skip_overlay_control_present_and_hidden_by_default():
+    """The batch-level 'skip our overlay for already-searchable PDFs' control
+    lives in the Documents card and is hidden until the frontend detects such
+    files (revealed by JS via /api/staged-pages text_layers)."""
+    html = client.get("/").text
+    assert '<div id="skip-overlay-wrap" class="skip-overlay" hidden>' in html
+    assert 'id="skip-overlay"' in html and 'id="skip-overlay-label"' in html
+    # Hidden by default via CSS as well as the attribute.
+    assert ".skip-overlay[hidden]" in _css()

@@ -107,6 +107,40 @@ def count_content_pages(path: str | Path) -> int:
         return 1
 
 
+def pdf_has_text_layer(
+    path: str | Path,
+    *,
+    max_pages_scanned: int = 50,
+    min_chars: int = 100,
+    min_ratio: float = 0.5,
+) -> bool:
+    """True if a PDF already carries a real, extractable text layer -- i.e. most
+    of its (sampled) pages hold a substantial amount of selectable text, the
+    hallmark of a document that was born digital or already OCR'd. Image inputs
+    and non-PDFs never have one.
+
+    Only page *text* is read (no rasterization), and at most ``max_pages_scanned``
+    pages are inspected, so this stays fast even on a huge PDF. Biased against
+    false positives -- a running header/footer alone won't clear ``min_chars`` --
+    so we never offer to skip our overlay for a document that isn't really
+    searchable."""
+    path = Path(path)
+    if path.suffix.lower() not in PDF_EXT:
+        return False
+    try:
+        with fitz.open(path) as doc:
+            scanned = min(doc.page_count, max_pages_scanned)
+            if scanned <= 0:
+                return False
+            with_text = sum(
+                1 for i in range(scanned)
+                if len(doc[i].get_text().strip()) >= min_chars
+            )
+            return with_text / scanned >= min_ratio
+    except Exception:
+        return False
+
+
 def _preprocess(img: Image.Image, *, enabled: bool, max_dimension: int) -> Image.Image:
     """Conservative preprocessing. Aggressive filters can hurt handwriting, so
     we only normalize orientation/color and apply gentle enhancement."""

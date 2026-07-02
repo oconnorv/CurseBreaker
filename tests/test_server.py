@@ -207,6 +207,55 @@ def test_staged_pages_are_deferred_then_filled_in(png_path):
     assert _wait_pages([fid])[fid] == 1
 
 
+def _searchable_pdf_bytes():
+    import fitz
+    doc = fitz.open()
+    for _ in range(2):
+        doc.new_page(width=612, height=792).insert_text(
+            (72, 100), "Lots of real, already-searchable text on this page. " * 6
+        )
+    data = doc.tobytes()
+    doc.close()
+    return data
+
+
+def test_staged_pages_report_existing_text_layer(png_path):
+    # The background scan also flags whether each staged file already carries a
+    # searchable text layer, so the UI can offer the batch-wide skip.
+    pdf = _searchable_pdf_bytes()
+    up = client.post(
+        "/api/upload",
+        files=[
+            ("files", ("textdoc.pdf", pdf, "application/pdf")),
+            ("files", ("sample.png", png_path.read_bytes(), "image/png")),
+        ],
+    ).json()
+    ids = {f["name"]: f["id"] for f in up["files"]}
+    _wait_pages(list(ids.values()))
+    layers = client.get("/api/staged-pages").json()["text_layers"]
+    assert layers[ids["textdoc.pdf"]] is True    # already searchable
+    assert layers[ids["sample.png"]] is False    # an image never is
+
+
+def test_process_skip_existing_text_overlay_passes_pdf_through(run_with_mock):
+    # End-to-end: a batch with skip enabled hands back the already-searchable PDF
+    # unchanged (the produced "searchable PDF" is byte-for-byte the original).
+    pdf = _searchable_pdf_bytes()
+    up = client.post(
+        "/api/upload", files={"files": ("textdoc.pdf", pdf, "application/pdf")}
+    ).json()
+    fid = up["files"][0]["id"]
+    started = client.post(
+        "/api/process",
+        json={"file_ids": [fid], "outputs": ["pdf"], "skip_existing_text_overlay": True},
+    ).json()
+    status = _wait_done(started["job_id"])
+    assert status["status"] == "done"
+    result = status["results"][0]
+    assert result["pdf"]
+    assert client.get(result["pdf"]).content == pdf  # original passed through
+
+
 def test_uploaded_bytes_survive_streaming_roundtrip(png_path):
     # Streaming the body to disk must reproduce the source exactly -- a corrupt
     # copy would surface as a wrong page count or a failed decode downstream.

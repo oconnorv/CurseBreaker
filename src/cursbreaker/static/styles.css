@@ -326,6 +326,13 @@ input[type=text], input[type=password], input[type=number], select, input:not([t
 .output-formats label { display: inline-flex; align-items: center; gap: 6px; font-size: 14px; cursor: pointer; }
 .output-formats input { width: 18px; height: 18px; accent-color: var(--accent); cursor: pointer; }
 
+/* Batch-level "skip our overlay for already-searchable PDFs" toggle. Shown only
+   when such files are detected; reads as a follow-on to the output picker. */
+.skip-overlay { margin: 8px 0 0; }
+.skip-overlay[hidden] { display: none; }
+.skip-overlay label { display: flex; align-items: flex-start; gap: 8px; font-size: 13.5px; line-height: 1.45; color: var(--muted); cursor: pointer; }
+.skip-overlay input { width: 18px; height: 18px; margin-top: 1px; flex: none; accent-color: var(--accent); cursor: pointer; }
+
 /* Track darker than the card + a strong hairline so the bar's fill clears the
    3:1 non-text contrast bar against its groove (1.4.11) in both themes. */
 .progress { height: 12px; background: var(--bg); border: 1px solid var(--border-strong); border-radius: 999px; overflow: hidden; }
