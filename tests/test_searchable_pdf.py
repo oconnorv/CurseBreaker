@@ -191,6 +191,38 @@ def test_pdf_overlay_appends_to_the_unaltered_original(tmp_path):
         assert "ORIGINAL 1" in doc[0].get_text() and "layer" in doc[0].get_text()
 
 
+def test_pdf_overlay_writes_one_content_stream_per_page(tmp_path):
+    # Regression: the invisible text layer is written as a single content stream
+    # per page (via TextWriter), not one PDF text object per word. The old
+    # per-word insert_text appended a separate content stream for every word
+    # (~hundreds on a dense page), which bloated text-heavy PDFs by ~50x. Here
+    # each page carries 1,200 words but must stay at one original + one overlay
+    # stream.
+    src = tmp_path / "src.pdf"
+    _source_pdf(src, n=2)  # each source page starts with a single content stream
+    many = " ".join(f"word{i}" for i in range(60))
+    pages = [
+        _page(612, 792, [
+            TranscribedLine(
+                text=many,
+                box=PixelBox(x0=40, y0=40 + r * 20, x1=560, y1=54 + r * 20),
+            )
+            for r in range(20)  # 20 lines x 60 words = 1,200 words/page
+        ], many)
+        for _ in range(2)
+    ]
+    out = tmp_path / "dense.pdf"
+    write_searchable_pdf_over_source(src, pages, out)
+    with fitz.open(out) as doc:
+        for i in range(2):
+            streams = len(doc[i].get_contents())
+            assert streams <= 2, (
+                f"page {i} has {streams} content streams; the overlay should add "
+                "just one (per-word insert_text would add ~1,200)"
+            )
+            assert "word0" in doc[i].get_text() and "word59" in doc[i].get_text()
+
+
 def test_pdf_overlay_falls_back_to_full_save(tmp_path, monkeypatch):
     # When a PDF can't be saved incrementally (PyMuPDF refuses, e.g. it repaired
     # the file on open), we fall back to a full save to a temp file and swap it

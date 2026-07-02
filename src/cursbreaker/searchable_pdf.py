@@ -24,11 +24,25 @@ from .models import PageResult
 
 _FONT_NAME = "cb-uni"
 _FONT_PATH = Path(__file__).parent / "fonts" / "DejaVuSans.ttf"
+_TEXTWRITER_FONT: fitz.Font | None = None
+
+
+def _overlay_font() -> fitz.Font:
+    """The bundled Unicode font as a reusable ``fitz.Font`` for ``TextWriter``,
+    parsed once and shared across pages/documents. Falls back to PyMuPDF's
+    built-in Helvetica if the file is somehow missing."""
+    global _TEXTWRITER_FONT
+    if _TEXTWRITER_FONT is None:
+        try:
+            _TEXTWRITER_FONT = fitz.Font(fontfile=str(_FONT_PATH))
+        except Exception:
+            _TEXTWRITER_FONT = fitz.Font("helv")
+    return _TEXTWRITER_FONT
 
 
 def _register_overlay_font(page) -> str:
-    """Make the bundled Unicode font available on this page, falling back to
-    PyMuPDF's built-in Helvetica if the file is somehow missing."""
+    """Make the bundled Unicode font available on this page (for the per-word
+    ``insert_text`` fallback), falling back to Helvetica if the file is missing."""
     if _FONT_PATH.is_file():
         try:
             page.insert_font(fontname=_FONT_NAME, fontfile=str(_FONT_PATH))
@@ -38,43 +52,73 @@ def _register_overlay_font(page) -> str:
     return "helv"
 
 
+def _iter_overlay_words(page_result: PageResult):
+    """Yield ``(word, box)`` for every non-empty word box on the page. Prefer real
+    per-word data (e.g. Tesseract) when present, so selection/search land on the
+    actual word boxes; otherwise split each line box proportionally (the only
+    option for Gemini-sourced lines)."""
+    for line in page_result.lines:
+        if line.words:
+            items = [(w.text, w.box) for w in line.words]
+        else:
+            items = split_line_into_words(line.text, line.box)
+        for word, wbox in items:
+            if wbox.x1 > wbox.x0 and wbox.y1 > wbox.y0:
+                yield word, wbox
+
+
 def _overlay_text(pdf_page, page_result: PageResult) -> None:
     """Lay the invisible (``render_mode=3``) OCR text onto an open PDF page.
 
     Box coordinates are in the OCR image's pixel space (the upright render the
-    model saw). We scale them to the page's displayed size, then map the point
-    from displayed -> unrotated coordinates via the page's derotation matrix and
-    pass the page rotation to ``insert_text`` -- so the text lands correctly even
-    on a page with a ``/Rotate`` (verified for 0/90/180/270)."""
+    model saw); we scale them to the page's displayed size. On an unrotated page
+    all words are written with a single ``TextWriter`` -- one content stream for
+    the whole page. The previous approach called ``insert_text`` once per word,
+    which emitted a separate PDF text object per word (hundreds on a dense page)
+    and bloated a text-heavy document by ~50x.
+
+    Rotated pages (and the rare case where ``TextWriter`` rejects some input)
+    fall back to per-word ``insert_text``, mapping each point from displayed ->
+    unrotated coordinates via the derotation matrix and passing the page rotation
+    -- placement verified for 90/180/270. A trailing space after each word keeps
+    tightly packed boxes from merging ("the cat" -> "thecat") on extraction."""
     rect = pdf_page.rect  # displayed size, with any rotation already applied
     if not page_result.width or not page_result.height:
         return
     sx = rect.width / page_result.width
     sy = rect.height / page_result.height
     rot = pdf_page.rotation
+
+    if rot == 0:
+        try:
+            tw = fitz.TextWriter(rect)
+            font = _overlay_font()
+            wrote = False
+            for word, wbox in _iter_overlay_words(page_result):
+                fontsize = max(1.0, (wbox.y1 - wbox.y0) * sy * 0.7)
+                # Baseline at the box's bottom-left (top-left origin).
+                tw.append(
+                    fitz.Point(wbox.x0 * sx, wbox.y1 * sy), word + " ",
+                    font=font, fontsize=fontsize,
+                )
+                wrote = True
+            if wrote:
+                tw.write_text(pdf_page, render_mode=3)
+            return
+        except Exception:
+            # TextWriter can reject unusual input; nothing is committed to the
+            # page until write_text(), so fall through and lay it down per-word.
+            pass
+
     derot = pdf_page.derotation_matrix
     font = _register_overlay_font(pdf_page)
-    for line in page_result.lines:
-        # Prefer real per-word data (e.g. Tesseract) when present, so cursor
-        # selection and search land on the actual word boxes; otherwise split the
-        # line box proportionally (the only option for Gemini-sourced lines).
-        if line.words:
-            word_items = [(w.text, w.box) for w in line.words]
-        else:
-            word_items = list(split_line_into_words(line.text, line.box))
-        for word, wbox in word_items:
-            if wbox.x1 <= wbox.x0 or wbox.y1 <= wbox.y0:
-                continue
-            fontsize = max(1.0, (wbox.y1 - wbox.y0) * sy * 0.7)
-            # Baseline at the box's bottom-left (top-left origin), in displayed
-            # space, then mapped into the page's unrotated coordinate system.
-            point = fitz.Point(wbox.x0 * sx, wbox.y1 * sy) * derot
-            # Trailing space helps the PDF text extractor see a word break
-            # between tightly packed boxes (otherwise "the cat" -> "thecat").
-            pdf_page.insert_text(
-                point, word + " ",
-                fontsize=fontsize, fontname=font, render_mode=3, rotate=rot,
-            )
+    for word, wbox in _iter_overlay_words(page_result):
+        fontsize = max(1.0, (wbox.y1 - wbox.y0) * sy * 0.7)
+        point = fitz.Point(wbox.x0 * sx, wbox.y1 * sy) * derot
+        pdf_page.insert_text(
+            point, word + " ",
+            fontsize=fontsize, fontname=font, render_mode=3, rotate=rot,
+        )
 
 
 def write_searchable_pdf_over_source(
