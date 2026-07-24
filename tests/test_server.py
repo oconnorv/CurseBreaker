@@ -1018,3 +1018,41 @@ def test_clear_batch_refused_while_job_running(run_with_slow_mock, png_path):
     # Don't leave a running job behind for later tests.
     client.post(f"/api/jobs/{job_id}/cancel")
     _wait_done(job_id)
+
+
+def test_browse_lists_subfolders_and_counts_supported_files(tmp_path, png_path):
+    # A dedicated folder so the png_path fixture (which also lives in tmp_path)
+    # doesn't inflate the supported-file count.
+    root = tmp_path / "browseroot"
+    root.mkdir()
+    (root / "sub1").mkdir()
+    (root / "sub2").mkdir()
+    (root / ".hidden").mkdir()  # dot-folders are hidden from the picker
+    (root / "a.png").write_bytes(png_path.read_bytes())
+    (root / "b.png").write_bytes(png_path.read_bytes())
+    (root / "notes.txt").write_text("x")  # unsupported -> not counted
+
+    r = client.get("/api/browse", params={"path": str(root)}).json()
+    assert r["path"] == str(root.resolve())
+    assert r["parent"] == str(root.resolve().parent)
+    assert {d["name"] for d in r["dirs"]} == {"sub1", "sub2"}
+    assert r["supported_files"] == 2
+    assert isinstance(r["roots"], list) and r["roots"]  # at least one drive/root
+
+
+def test_browse_defaults_to_home_dir():
+    r = client.get("/api/browse").json()
+    assert r["path"] == str(Path.home().resolve())
+
+
+def test_browse_missing_path_is_404():
+    r = client.get("/api/browse", params={"path": "/no/such/place/xyz987"})
+    assert r.status_code == 404
+
+
+def test_browse_on_a_file_browses_its_parent(tmp_path, png_path):
+    f = tmp_path / "scan.png"
+    f.write_bytes(png_path.read_bytes())
+    r = client.get("/api/browse", params={"path": str(f)}).json()
+    assert r["path"] == str(tmp_path.resolve())  # the folder holding the file
+    assert r["supported_files"] >= 1

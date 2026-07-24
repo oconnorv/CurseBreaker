@@ -194,5 +194,34 @@ el("progress-card").hidden = false;  // a run on screen also warrants it
 updateClearButton();
 check("clear button shown while a run is on screen", el("clear-batch").hidden === false);
 
+// --- Group G: in-app folder picker render ------------------------------- //
+check("openFolderPicker is exported", typeof sandbox.openFolderPicker === "function");
+check("loadFolder is exported", typeof sandbox.loadFolder === "function");
+check("useThisFolder is exported", typeof sandbox.useThisFolder === "function");
+// Feed a canned /api/browse payload and confirm the picker renders it.
+sandbox.fetch = () => Promise.resolve({ ok: true, json: async () => ({
+  path: "/home/u/Scans", parent: "/home/u",
+  dirs: [{ name: "Ledger1887", path: "/home/u/Scans/Ledger1887" },
+         { name: "Ledger1888", path: "/home/u/Scans/Ledger1888" }],
+  supported_files: 12, roots: [{ name: "/", path: "/" }],
+}) });
+await sandbox.loadFolder("/home/u/Scans");
+check("folder path is shown", el("folder-path").textContent === "/home/u/Scans",
+  el("folder-path").textContent);
+check("up is enabled when a parent exists", el("folder-up").disabled === false);
+check("sub-folders render one button each", el("folder-list")._children.length === 2,
+  el("folder-list")._children.length);
+check("drive roots render", el("folder-roots")._children.length === 1);
+check("status reports the supported-file count",
+  el("folder-status").textContent.includes("12 supported"), el("folder-status").textContent);
+// At a drive root (no parent), Up is disabled and an empty folder still invites use.
+sandbox.fetch = () => Promise.resolve({ ok: true, json: async () => ({
+  path: "/", parent: null, dirs: [], supported_files: 0, roots: [{ name: "/", path: "/" }],
+}) });
+await sandbox.loadFolder("/");
+check("up disabled at a root (no parent)", el("folder-up").disabled === true);
+check("empty folder still invites using it",
+  el("folder-status").textContent.includes("use this one"), el("folder-status").textContent);
+
 console.log("\n" + (failures === 0 ? "ALL PASS" : failures + " FAILURE(S)"));
 process.exit(failures === 0 ? 0 : 1);

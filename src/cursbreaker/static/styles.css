@@ -397,6 +397,26 @@ dialog.modal::backdrop { background: rgba(0,0,0,.7); }
 .modal-body { overflow: auto; padding: 12px; }
 .modal-body img { max-width: 86vw; max-height: 74vh; display: block; }
 
+/* In-app folder picker (the "Browse…" dialog for add-from-path). Reuses the
+   preview modal's shell (.modal / .modal-inner / .modal-head). */
+.folder-modal .modal-inner { width: 560px; max-width: 92vw; }
+.folder-roots { display: flex; flex-wrap: wrap; gap: 6px; padding: 12px 16px 0; }
+.folder-nav { display: flex; align-items: center; gap: 10px; padding: 10px 16px; }
+.folder-path { font-size: 13px; color: var(--muted); word-break: break-all; }
+.folder-list {
+  list-style: none; margin: 0; padding: 4px 8px; overflow-y: auto;
+  min-height: 90px; max-height: 46vh;
+  border-top: 1px solid var(--border); border-bottom: 1px solid var(--border);
+}
+.folder-item {
+  display: block; width: 100%; text-align: left; background: transparent;
+  border: none; color: var(--text); font-size: 14px; padding: 10px;
+  border-radius: 8px; cursor: pointer;
+}
+.folder-item:hover, .folder-item:focus-visible { background: var(--bg); outline: none; }
+.folder-status { margin: 0; padding: 10px 16px; font-size: 13px; }
+.folder-actions { display: flex; justify-content: flex-end; padding: 0 16px 14px; }
+
 /* Respect users who prefer less motion. */
 @media (prefers-reduced-motion: reduce) {
   html { scroll-behavior: auto; }

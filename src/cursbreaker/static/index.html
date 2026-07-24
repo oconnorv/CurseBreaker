@@ -4,7 +4,7 @@
   <meta charset="utf-8" />
   <meta name="viewport" content="width=device-width, initial-scale=1" />
   <title>CursBreaker</title>
-  <link rel="stylesheet" href="/static/styles.css?v=31" />
+  <link rel="stylesheet" href="/static/styles.css?v=32" />
   <link rel="icon" type="image/png" href="/static/favicon.png" />
   <script>
     /* Apply the saved theme before first paint so light-theme users see no flash. */
@@ -139,9 +139,10 @@
         <div class="path-add-row">
           <input type="text" id="path-input" class="path-input" autocomplete="off"
                  spellcheck="false" placeholder="Paste a folder or file path, e.g. D:\Scans\Ledger1887" />
+          <button id="browse-folder" class="btn" type="button">Browse&hellip;</button>
           <button id="add-path" class="btn" type="button">Add from path</button>
         </div>
-        <p class="hint">In File Explorer, Shift-right-click the folder &rarr; &ldquo;Copy as path&rdquo;, then paste here. Files are read in place &mdash; not copied or modified.</p>
+        <p class="hint">Click <b>Browse&hellip;</b> to pick a folder on this computer, or paste a path. Files are read in place &mdash; not copied or modified.</p>
       </div>
 
       <!-- role="list" is explicit: list-style:none drops the implicit list
@@ -252,6 +253,28 @@
     </div>
   </dialog>
 
+  <!-- In-app folder browser for "add from path": lists folders on this computer
+       (the app runs locally) so the user can pick one instead of copying a path.
+       The chosen folder's files are then read in place, never copied. -->
+  <dialog id="folder-modal" class="modal folder-modal" aria-labelledby="folder-modal-title">
+    <div class="modal-inner">
+      <div class="modal-head">
+        <h2 id="folder-modal-title" class="modal-title">Choose a folder</h2>
+        <button id="folder-cancel" class="btn small" type="button">Cancel</button>
+      </div>
+      <div id="folder-roots" class="folder-roots" aria-label="Drives"></div>
+      <div class="folder-nav">
+        <button id="folder-up" class="btn small" type="button">&uarr; Up</button>
+        <span id="folder-path" class="folder-path" aria-live="polite"></span>
+      </div>
+      <ul id="folder-list" class="folder-list" role="list" aria-label="Sub-folders"></ul>
+      <p id="folder-status" class="folder-status muted" role="status" aria-live="polite"></p>
+      <div class="folder-actions">
+        <button id="folder-use" class="btn primary" type="button">Use this folder</button>
+      </div>
+    </div>
+  </dialog>
+
   <details class="glossary">
     <summary>Glossary &mdash; what these terms mean (plain language)</summary>
     <dl class="glossary-body">
@@ -286,6 +309,6 @@
     <a href="https://github.com/oconnorv/CursBreaker" target="_blank" rel="noopener noreferrer">GitHub</a>.
   </footer>
 
-  <script src="/static/app.js?v=33"></script>
+  <script src="/static/app.js?v=34"></script>
 </body>
 </html>

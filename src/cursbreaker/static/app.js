@@ -1099,6 +1099,85 @@ async function addFromPath() {
   }
 }
 
+// ---- in-app folder picker (native OS dialogs can't reveal a folder's
+// absolute path to a web page, so we browse the local filesystem ourselves and
+// fill the path box, then reuse the read-in-place add-from-path flow) -------- //
+let folderCurrentPath = null;   // the folder currently shown (what "Use" stages)
+let folderParentPath = null;    // its parent, for the "Up" button
+
+function openFolderPicker() {
+  lastFocused = document.activeElement;  // restore focus here on close
+  const dlg = $("folder-modal");
+  if (typeof dlg.showModal === "function" && !dlg.open) dlg.showModal();
+  else dlg.setAttribute("open", "");
+  // Seed from whatever's already typed (if it points somewhere), else home.
+  const seed = ($("path-input").value || "").trim();
+  loadFolder(seed || null);
+}
+
+function closeFolderPicker() {
+  const dlg = $("folder-modal");
+  if (typeof dlg.close === "function" && dlg.open) dlg.close();
+  else dlg.removeAttribute("open");
+}
+
+// Fetch and render one directory's contents into the picker.
+async function loadFolder(path) {
+  const status = $("folder-status");
+  status.textContent = "Loading…";
+  let data;
+  try {
+    const q = path ? "?path=" + encodeURIComponent(path) : "";
+    data = await api("GET", "/api/browse" + q);
+  } catch (e) {
+    status.textContent = "Can't open that folder: " + e.message;
+    return;
+  }
+  folderCurrentPath = data.path;
+  folderParentPath = data.parent;
+  $("folder-path").textContent = data.path;
+  $("folder-up").disabled = !data.parent;
+
+  // Drive roots (Windows) / "/" (POSIX) as quick jumps.
+  const roots = $("folder-roots");
+  roots.replaceChildren();
+  for (const r of data.roots || []) {
+    const b = document.createElement("button");
+    b.className = "btn small"; b.type = "button"; b.textContent = r.name;
+    b.onclick = () => loadFolder(r.path);
+    roots.appendChild(b);
+  }
+
+  // Sub-folders (click to descend).
+  const list = $("folder-list");
+  list.replaceChildren();
+  for (const d of data.dirs || []) {
+    const li = document.createElement("li");
+    const b = document.createElement("button");
+    b.className = "folder-item"; b.type = "button";
+    b.textContent = "📁 " + d.name;
+    b.setAttribute("aria-label", "Open folder " + d.name);
+    b.onclick = () => loadFolder(d.path);
+    li.appendChild(b);
+    list.appendChild(li);
+  }
+
+  const n = data.supported_files || 0;
+  const subs = (data.dirs || []).length;
+  status.textContent =
+    `${n} supported file(s) here` + (subs ? ` · ${subs} sub-folder(s)` : "")
+    + (n === 0 ? " — open a sub-folder, or use this one anyway" : "");
+}
+
+// "Use this folder": fill the path box with the current folder and add it via
+// the existing read-in-place flow.
+async function useThisFolder() {
+  if (!folderCurrentPath) return;
+  $("path-input").value = folderCurrentPath;
+  closeFolderPicker();
+  await addFromPath();
+}
+
 function wire() {
   $("save-key").onclick = () => {
     const hadKey = $("api_key").value.trim() !== "";
@@ -1136,6 +1215,11 @@ function wire() {
   $("path-input").addEventListener("keydown", (e) => {
     if (e.key === "Enter") { e.preventDefault(); addFromPath(); }
   });
+  // In-app folder picker for add-from-path.
+  $("browse-folder").onclick = openFolderPicker;
+  $("folder-cancel").onclick = closeFolderPicker;
+  $("folder-up").onclick = () => loadFolder(folderParentPath);
+  $("folder-use").onclick = useThisFolder;
   dz.addEventListener("dragover", (e) => { e.preventDefault(); dz.classList.add("drag"); });
   dz.addEventListener("dragleave", () => dz.classList.remove("drag"));
   dz.addEventListener("drop", (e) => {
@@ -1181,6 +1265,13 @@ function wire() {
   dlg.addEventListener("click", (e) => { if (e.target === dlg) closePreview(); });
   // Esc (native) and the Close button both fire 'close' -> restore focus.
   dlg.addEventListener("close", () => {
+    if (lastFocused && typeof lastFocused.focus === "function") lastFocused.focus();
+  });
+
+  // Same backdrop-close + focus-restore for the folder picker dialog.
+  const fdlg = $("folder-modal");
+  fdlg.addEventListener("click", (e) => { if (e.target === fdlg) closeFolderPicker(); });
+  fdlg.addEventListener("close", () => {
     if (lastFocused && typeof lastFocused.focus === "function") lastFocused.focus();
   });
 }

@@ -108,3 +108,18 @@ def test_clear_batch_button_present_in_actions():
     assert 'id="clear-batch"' in html and "Clear batch" in html
     assert 'hidden' in html.split('id="clear-batch"')[1].split(">")[0]  # hidden attr
     assert ".clear-batch { margin-left: auto; }" in _css()
+
+
+def test_folder_picker_present():
+    """An in-app 'Browse…' folder picker lets the user pick a folder instead of
+    copy-pasting a path; a native OS dialog can't reveal absolute paths to a web
+    page, so the picker (and its modal) are served by the app itself."""
+    html = client.get("/").text
+    assert 'id="browse-folder"' in html                 # the Browse… button
+    assert 'id="folder-modal"' in html                  # the picker dialog
+    for el in ('id="folder-list"', 'id="folder-up"', 'id="folder-use"',
+               'id="folder-roots"', 'id="folder-path"'):
+        assert el in html, el
+    # The hint now points at Browse first, not just copy-as-path.
+    assert "to pick a folder" in html
+    assert ".folder-list {" in _css()
