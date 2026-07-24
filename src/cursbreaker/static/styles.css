@@ -44,6 +44,13 @@
 
 * { box-sizing: border-box; }
 
+/* Make the HTML `hidden` attribute authoritative. Components like `.btn` set
+   `display`, which (as an author rule) overrides the UA sheet's
+   `[hidden]{display:none}` -- so `el.hidden = true` on a button (e.g. "Clear
+   batch" or "Cancel") would otherwise leave it on screen. `!important` here
+   guarantees a hidden element is actually hidden, whatever its display. */
+[hidden] { display: none !important; }
+
 html { scroll-behavior: smooth; }
 
 body {

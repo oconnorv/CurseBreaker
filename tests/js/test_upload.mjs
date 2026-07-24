@@ -54,7 +54,7 @@ const sandbox = {
   fetch: () => Promise.resolve({ ok: true, json: async () => ({}) }),
   matchMedia: () => ({ matches: false }),
   console, navigator: { sendBeacon() {} },
-  setInterval: () => 0, clearInterval: () => {}, setTimeout: () => 0,
+  setInterval: () => 0, clearInterval: () => {}, setTimeout: () => 0, clearTimeout: () => {},
   confirm: () => true, FormData: class { append() {} },
   XMLHttpRequest: class { open() {} send() {} },
   addEventListener() {},
@@ -222,6 +222,21 @@ await sandbox.loadFolder("/");
 check("up disabled at a root (no parent)", el("folder-up").disabled === true);
 check("empty folder still invites using it",
   el("folder-status").textContent.includes("use this one"), el("folder-status").textContent);
+
+// --- Group H: clearBatch resets to a visibly-ready state ---------------- //
+check("clearBatch is exported", typeof sandbox.clearBatch === "function");
+sandbox.fetch = () => Promise.resolve({ ok: true, json: async () => ({ freed_bytes: 2048 }) });
+el("results-card").hidden = false;   // pretend a finished batch is on screen
+el("progress-card").hidden = false;
+el("clear-batch").hidden = false;
+await sandbox.clearBatch();
+check("clearBatch hides the results card", el("results-card").hidden === true);
+check("clearBatch hides the progress card", el("progress-card").hidden === true);
+check("clearBatch hides its own button", el("clear-batch").hidden === true);
+check("clearBatch shows a ready-for-a-new-batch cue",
+  el("action-note").textContent.includes("ready for a new batch"), el("action-note").textContent);
+check("clearBatch reports the freed space",
+  el("action-note").textContent.includes("Freed"), el("action-note").textContent);
 
 console.log("\n" + (failures === 0 ? "ALL PASS" : failures + " FAILURE(S)"));
 process.exit(failures === 0 ? 0 : 1);
