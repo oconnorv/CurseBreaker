@@ -123,3 +123,11 @@ def test_folder_picker_present():
     # The hint now points at Browse first, not just copy-as-path.
     assert "to pick a folder" in html
     assert ".folder-list {" in _css()
+
+
+def test_hidden_attribute_is_authoritative():
+    """`.btn` sets `display`, which (as an author rule) overrides the UA sheet's
+    `[hidden]{display:none}`. Without a global override, hiding a button via
+    `el.hidden = true` -- Clear batch, Cancel -- would leave it on screen. This
+    rule keeps the reset visually correct."""
+    assert "[hidden] { display: none !important; }" in _css()

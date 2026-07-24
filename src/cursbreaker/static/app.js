@@ -459,10 +459,17 @@ async function clearBatch() {
   const pause = $("pause-banner"); if (pause) pause.hidden = true;
   $("progress-bar").style.width = "0%";
   $("progress").setAttribute("aria-valuenow", "0");
-  // Set the note after renderStaged (which resets it to the empty summary).
-  $("action-note").textContent = "Batch cleared." + freed;
-  announce("Batch cleared." + freed);
+  // Set the note after renderStaged (which resets it to the empty summary) so
+  // the user gets a clear, positive "you can start again" signal.
+  $("action-note").textContent = "Cleared — ready for a new batch." + freed;
+  announce("Batch cleared — ready for a new batch." + freed);
   updateClearButton();
+  // The user may have been scrolled down at the results when they cleared; bring
+  // the reset, ready-to-go Documents card back into view.
+  const docs = document.querySelector('[aria-labelledby="documents-heading"]');
+  if (docs && typeof docs.scrollIntoView === "function") {
+    docs.scrollIntoView({ behavior: "smooth", block: "start" });
+  }
 }
 
 // ---- lazy page counts --------------------------------------------------- //
