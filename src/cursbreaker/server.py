@@ -406,6 +406,68 @@ def stage_path(req: StagePathRequest):
     return {"files": staged, "skipped": skipped}
 
 
+def _drive_roots() -> list[dict]:
+    """Top-level starting points for the folder browser: existing drive letters
+    on Windows (C:\\, D:\\, …), or '/' on POSIX. Lets the picker jump between
+    drives, which have no common parent to walk up to."""
+    if os.name == "nt":
+        roots = []
+        for letter in "ABCDEFGHIJKLMNOPQRSTUVWXYZ":
+            d = f"{letter}:\\"
+            if os.path.exists(d):
+                roots.append({"name": d, "path": d})
+        return roots or [{"name": "C:\\", "path": "C:\\"}]
+    return [{"name": "/", "path": "/"}]
+
+
+@app.get("/api/browse")
+def browse(path: str | None = None):
+    """List the sub-folders of a directory on *this computer* so the UI can offer
+    a folder picker (CursBreaker runs locally, so this browses the user's own
+    machine -- the same files the 'add from path' flow reads in place).
+
+    Returns the resolved folder, its parent (for an 'up' button), the immediate
+    sub-folders, the drive roots to jump to, and a count of supported files in
+    the folder so the user can confirm they've found the right one. Defaults to
+    the home directory when no path is given; a file path browses its parent."""
+    try:
+        base = (Path(path).expanduser() if path else Path.home()).resolve()
+    except (OSError, RuntimeError, ValueError):
+        raise HTTPException(400, "That path can't be read.")
+    if not base.exists():
+        raise HTTPException(404, f"Path not found: {path}")
+    if not base.is_dir():
+        base = base.parent  # a file -> browse the folder that holds it
+
+    try:
+        entries = sorted(base.iterdir(), key=lambda p: p.name.lower())
+    except PermissionError:
+        raise HTTPException(403, "Permission denied for that folder.")
+    except OSError as exc:
+        raise HTTPException(400, f"Can't read that folder: {exc.strerror or exc}")
+
+    dirs, supported = [], 0
+    for e in entries:
+        try:
+            if e.name.startswith("."):
+                continue  # hide dot-folders (.git, .cache, …) to cut clutter
+            if e.is_dir():
+                dirs.append({"name": e.name, "path": str(e)})
+            elif e.is_file() and is_supported(e.name):
+                supported += 1
+        except OSError:
+            pass  # unreadable entry -> skip it, keep listing the rest
+
+    parent = str(base.parent) if base.parent != base else None
+    return {
+        "path": str(base),
+        "parent": parent,
+        "dirs": dirs,
+        "supported_files": supported,
+        "roots": _drive_roots(),
+    }
+
+
 class ProcessRequest(BaseModel):
     file_ids: list[str]
     mode: str | None = None
