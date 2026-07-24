@@ -285,6 +285,75 @@ def staged_pages():
         return {"pages": dict(STAGED_PAGES), "text_layers": dict(STAGED_HAS_TEXT)}
 
 
+def _is_under(path: Path, base: Path) -> bool:
+    """True if ``path`` lives inside ``base`` -- used to tell our own staged
+    upload *copies* (safe to delete) apart from files staged by path (the user's
+    originals, read in place and never ours to remove)."""
+    try:
+        return Path(path).resolve().is_relative_to(Path(base).resolve())
+    except (OSError, ValueError):
+        return False
+
+
+def _tree_bytes(path: Path) -> int:
+    """Total size of the files under ``path`` (0 if it's already gone). Best
+    effort, only to report how much disk a clear frees."""
+    total = 0
+    try:
+        for p in Path(path).rglob("*"):
+            try:
+                if p.is_file():
+                    total += p.stat().st_size
+            except OSError:
+                pass
+    except OSError:
+        pass
+    return total
+
+
+@app.post("/api/clear")
+def clear_batch():
+    """Clear the current batch so a fresh one can start: drop every staged file
+    and finished-job output, and free the disk they held under the workspace.
+
+    Files staged by *path* (the user's own originals, read in place) are only
+    unstaged -- never deleted; we remove only copies we made (uploads) and
+    outputs we generated. Refuses while a job is still running so we never pull
+    the workspace out from under the worker."""
+    if any(j.get("status") == "running" for j in JOBS.values()):
+        raise HTTPException(409, "A job is still running — cancel it first, then clear.")
+
+    files_cleared = len(STAGED)
+    jobs_cleared = len(JOBS)
+    freed = 0
+
+    # Staged uploads each live in their own STAGE_DIR/<id>/ subdir; delete those.
+    # Path-staged originals sit outside STAGE_DIR and are left on disk untouched.
+    for path in list(STAGED.values()):
+        if _is_under(Path(path), STAGE_DIR):
+            sub = Path(path).parent
+            freed += _tree_bytes(sub)
+            shutil.rmtree(sub, ignore_errors=True)
+    STAGED.clear()
+    with _STAGED_PAGES_LOCK:
+        STAGED_PAGES.clear()
+        STAGED_HAS_TEXT.clear()
+
+    # Generated outputs: one dir per job.
+    for job in list(JOBS.values()):
+        out = job.get("out_dir")
+        if out:
+            freed += _tree_bytes(Path(out))
+            shutil.rmtree(out, ignore_errors=True)
+    JOBS.clear()
+
+    return {
+        "files_cleared": files_cleared,
+        "jobs_cleared": jobs_cleared,
+        "freed_bytes": freed,
+    }
+
+
 class StagePathRequest(BaseModel):
     path: str
 

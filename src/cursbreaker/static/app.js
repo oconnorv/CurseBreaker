@@ -405,6 +405,64 @@ function renderStaged() {
   $("action-note").textContent = stagedStatus();
   // Removing files can change how many already-searchable PDFs remain.
   updateSkipOverlayControl();
+  updateClearButton();
+}
+
+// ---- clear the batch ---------------------------------------------------- //
+
+// "Clear batch" appears whenever there's something to clear -- staged files, a
+// run in progress, or a results set on screen -- and is disabled while a job is
+// running (clearing mid-run would pull the workspace out from under the worker).
+function updateClearButton() {
+  const btn = $("clear-batch");
+  if (!btn) return;
+  const showing = staged.length > 0
+    || !$("results-card").hidden
+    || !$("progress-card").hidden;
+  btn.hidden = !showing;
+  btn.disabled = jobRunning();
+}
+
+// Wipe the current batch server-side (staged uploads + generated outputs) and
+// reset the page to a clean slate so the next batch has room. The user's own
+// on-disk originals (files staged by path) are only unstaged, never deleted.
+async function clearBatch() {
+  if (jobRunning()) return;  // guarded by the disabled button too
+  const hadResults = !$("results-card").hidden;
+  const ok = confirm(
+    hadResults
+      ? "Clear this batch and its results?\n\nFiles you've already downloaded are "
+        + "kept. Staged files and the generated outputs are removed from the server."
+      : "Clear the staged files?\n\nThey're removed from the server. Your original "
+        + "files on disk are left untouched."
+  );
+  if (!ok) return;
+  let freed = "";
+  try {
+    const r = await api("POST", "/api/clear");
+    if (r && r.freed_bytes) freed = " Freed " + formatBytes(r.freed_bytes) + ".";
+  } catch (e) {
+    $("action-note").textContent = "Couldn't clear: " + e.message;
+    return;
+  }
+  // Reset all batch state + UI to the clean, nothing-staged starting point.
+  staged = [];
+  renderStaged();                 // clears the list; resets the note + buttons
+  $("progress-card").hidden = true;
+  $("results-card").hidden = true;
+  $("results").innerHTML = "";
+  const rt = $("results-tokens"); if (rt) { rt.hidden = true; rt.textContent = ""; }
+  const dn = $("download-note"); if (dn) { dn.hidden = true; dn.textContent = ""; }
+  const tt = $("token-text"); if (tt) tt.textContent = "";
+  const log = $("activity-log"); if (log) { log.replaceChildren(); log.dataset.shown = "0"; }
+  const live = $("activity-live"); if (live) live.textContent = "";
+  const pause = $("pause-banner"); if (pause) pause.hidden = true;
+  $("progress-bar").style.width = "0%";
+  $("progress").setAttribute("aria-valuenow", "0");
+  // Set the note after renderStaged (which resets it to the empty summary).
+  $("action-note").textContent = "Batch cleared." + freed;
+  announce("Batch cleared." + freed);
+  updateClearButton();
 }
 
 // ---- lazy page counts --------------------------------------------------- //
@@ -540,6 +598,7 @@ async function transcribe() {
     const cancel = $("cancel-job");
     if (cancel) { cancel.hidden = false; cancel.disabled = false; cancel.textContent = "Cancel"; }
     $("progress-card").hidden = false;
+    updateClearButton();  // now a job is running -> shown but disabled
     pollJob(job_id);
   } catch (e) {
     $("action-note").textContent = "Error: " + e.message;
@@ -717,6 +776,7 @@ function pollJob(jobId) {
           if (h) { h.scrollIntoView({ block: "center" }); h.focus(); }
         }
       }
+      updateClearButton();  // job finished: re-enable clear (results may be up)
     }
   };
   tick();
@@ -1085,6 +1145,8 @@ function wire() {
 
   $("transcribe").onclick = transcribe;
   $("estimate").onclick = estimateCost;
+  $("clear-batch").onclick = clearBatch;
+  updateClearButton();  // hidden until there's a batch to clear
   $("cancel-job").onclick = cancelJob;
   const resumeBtn = $("resume-job"); if (resumeBtn) resumeBtn.onclick = resumeJob;
   const stopBtn = $("stop-job"); if (stopBtn) stopBtn.onclick = endJob;

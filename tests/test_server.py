@@ -1,6 +1,7 @@
 import io
 import time
 import zipfile
+from pathlib import Path
 
 import pytest
 from fastapi.testclient import TestClient
@@ -959,3 +960,61 @@ def test_index_has_cost_controls():
     # The manual price inputs are gone; pricing is automatic now.
     assert 'id="price_input_per_mtok"' not in html
     assert 'id="price_output_per_mtok"' not in html
+
+
+def test_clear_batch_removes_staged_uploads_and_job_outputs(run_with_mock, png_path):
+    from cursbreaker import server
+
+    with open(png_path, "rb") as fh:
+        up = client.post(
+            "/api/upload", files={"files": ("sample.png", fh, "image/png")}
+        ).json()
+    fid = up["files"][0]["id"]
+    upload_dir = Path(server.STAGED[fid]).parent  # STAGE_DIR/<id>/
+    assert upload_dir.exists()
+
+    job_id = client.post("/api/process", json={"file_ids": [fid]}).json()["job_id"]
+    _wait_done(job_id)
+    out_dir = Path(server.JOBS[job_id]["out_dir"])
+    assert out_dir.exists() and any(out_dir.iterdir())  # outputs were written
+
+    r = client.post("/api/clear").json()
+    assert r["files_cleared"] >= 1 and r["jobs_cleared"] >= 1
+    assert r["freed_bytes"] > 0
+    # Both the in-memory state and the on-disk files are gone.
+    assert server.STAGED == {} and server.JOBS == {}
+    assert not upload_dir.exists()
+    assert not out_dir.exists()
+
+
+def test_clear_batch_keeps_path_staged_originals(png_path):
+    from cursbreaker import server
+
+    # Staging by path reads the user's original in place; clearing must only
+    # unstage it, never delete it.
+    client.post("/api/stage-path", json={"path": str(png_path)})
+    assert str(png_path) in {str(p) for p in server.STAGED.values()}
+
+    client.post("/api/clear")
+    assert str(png_path) not in {str(p) for p in server.STAGED.values()}
+    assert png_path.exists()  # the original is untouched on disk
+
+
+def test_clear_batch_refused_while_job_running(run_with_slow_mock, png_path):
+    from cursbreaker import server
+
+    with open(png_path, "rb") as fh:
+        up = client.post(
+            "/api/upload", files={"files": ("slow.png", fh, "image/png")}
+        ).json()
+    fid = up["files"][0]["id"]
+    job_id = client.post("/api/process", json={"file_ids": [fid]}).json()["job_id"]
+
+    # The slow mock keeps the job 'running' long enough to hit the guard.
+    resp = client.post("/api/clear")
+    assert resp.status_code == 409
+    assert job_id in server.JOBS  # nothing was cleared
+
+    # Don't leave a running job behind for later tests.
+    client.post(f"/api/jobs/{job_id}/cancel")
+    _wait_done(job_id)

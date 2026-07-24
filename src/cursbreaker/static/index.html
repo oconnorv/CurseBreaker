@@ -4,7 +4,7 @@
   <meta charset="utf-8" />
   <meta name="viewport" content="width=device-width, initial-scale=1" />
   <title>CursBreaker</title>
-  <link rel="stylesheet" href="/static/styles.css?v=30" />
+  <link rel="stylesheet" href="/static/styles.css?v=31" />
   <link rel="icon" type="image/png" href="/static/favicon.png" />
   <script>
     /* Apply the saved theme before first paint so light-theme users see no flash. */
@@ -175,6 +175,10 @@
         <button id="transcribe" class="btn primary" type="button" disabled>Transcribe</button>
         <button id="estimate" class="btn" type="button" disabled>Estimate cost</button>
         <span id="action-note" class="muted" role="status" aria-live="polite"></span>
+        <!-- Appears once there's a batch to clear (staged files, progress, or
+             results). Frees the staged uploads + generated outputs on the server
+             so a fresh batch has room; the user's own on-disk originals are kept. -->
+        <button id="clear-batch" class="btn clear-batch" type="button" hidden>Clear batch</button>
       </div>
       <div id="estimate-info" class="key-info estimate-info" role="status" aria-live="polite" hidden></div>
     </section>
@@ -282,6 +286,6 @@
     <a href="https://github.com/oconnorv/CursBreaker" target="_blank" rel="noopener noreferrer">GitHub</a>.
   </footer>
 
-  <script src="/static/app.js?v=32"></script>
+  <script src="/static/app.js?v=33"></script>
 </body>
 </html>
