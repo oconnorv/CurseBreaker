@@ -72,7 +72,7 @@ const check = (name, cond, extra) => {
 
 const { planUploadBatches, formatBytes, uploadStatusText, isSupportedFile,
         stagedStatus, pendingPageCounts, applyStagedPages,
-        applyStagedTextLayers } = sandbox;
+        applyStagedTextLayers, updateClearButton } = sandbox;
 check("planUploadBatches is exported", typeof planUploadBatches === "function");
 check("formatBytes is exported", typeof formatBytes === "function");
 check("uploadStatusText is exported", typeof uploadStatusText === "function");
@@ -176,6 +176,23 @@ check("applyStagedTextLayers ignores a null (still scanning)", pending[0].hasTex
   String(pending[0].hasText));
 applyStagedTextLayers(pending, undefined);  // tolerates a missing map
 check("applyStagedTextLayers tolerates a missing map", pending[0].hasText === undefined);
+
+// --- Group F: clear-batch visibility ------------------------------------ //
+// (Nothing is staged in the harness, so this exercises the card-based reveal.)
+check("updateClearButton is exported", typeof updateClearButton === "function");
+el("results-card").hidden = true;
+el("progress-card").hidden = true;
+updateClearButton();
+check("clear button hidden when there's nothing to clear",
+  el("clear-batch").hidden === true, String(el("clear-batch").hidden));
+el("results-card").hidden = false;  // a results set is something to clear
+updateClearButton();
+check("clear button shown when results are on screen", el("clear-batch").hidden === false);
+check("clear button enabled when idle (no job running)", el("clear-batch").disabled === false);
+el("results-card").hidden = true;
+el("progress-card").hidden = false;  // a run on screen also warrants it
+updateClearButton();
+check("clear button shown while a run is on screen", el("clear-batch").hidden === false);
 
 console.log("\n" + (failures === 0 ? "ALL PASS" : failures + " FAILURE(S)"));
 process.exit(failures === 0 ? 0 : 1);

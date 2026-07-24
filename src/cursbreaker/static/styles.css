@@ -307,6 +307,9 @@ input[type=text], input[type=password], input[type=number], select, input:not([t
 .staged .rm:hover { color: var(--err-ink); border-color: rgba(255,107,107,.4); }
 
 .actions { margin-top: 16px; display: flex; align-items: center; gap: 12px; flex-wrap: wrap; }
+/* Push "Clear batch" to the far end of the row so it's clearly separated from
+   the primary Transcribe/Estimate actions (and less likely to be hit by mistake). */
+.clear-batch { margin-left: auto; }
 
 /* Bulk-download controls in the Results header: a type picker + actions, wrapping
    on narrow widths. Native checkboxes keep the user-agent target-size exception. */

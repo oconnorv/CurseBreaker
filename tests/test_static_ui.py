@@ -97,3 +97,14 @@ def test_skip_overlay_control_present_and_hidden_by_default():
     assert 'id="skip-overlay"' in html and 'id="skip-overlay-label"' in html
     # Hidden by default via CSS as well as the attribute.
     assert ".skip-overlay[hidden]" in _css()
+
+
+def test_clear_batch_button_present_in_actions():
+    """A 'Clear batch' button lets the user wipe the current batch to make room
+    for a new one. It sits in the Documents actions row, hidden until there's
+    something to clear (revealed by JS), and is pushed to the far end so it's not
+    mistaken for a primary action."""
+    html = client.get("/").text
+    assert 'id="clear-batch"' in html and "Clear batch" in html
+    assert 'hidden' in html.split('id="clear-batch"')[1].split(">")[0]  # hidden attr
+    assert ".clear-batch { margin-left: auto; }" in _css()
